@@ -24,7 +24,7 @@ The compose stack runs three services:
 | Service | Image | Role |
 |---|---|---|
 | `caddy` | `caddy:2-alpine` | TLS termination, security headers, reverse proxy |
-| `carapace` | `therealstein/carapace:latest` | Auth, rate limiting, body validation, proxying |
+| `carapace` | `therealstein/carapace:1.0.1` | Auth, rate limiting, body validation, proxying |
 | `openclaw` | `alpine/openclaw` | Gateway backend |
 
 ## Install (recommended)
