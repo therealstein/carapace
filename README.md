@@ -24,7 +24,7 @@ The compose stack runs three services:
 | Service | Image | Role |
 |---|---|---|
 | `caddy` | `caddy:2-alpine` | TLS termination, security headers, reverse proxy |
-| `carapace` | `therealstein/carapace:1.0.1` | Auth, rate limiting, body validation, proxying |
+| `carapace` | `therealstein/carapace:1.0.2` | Auth, rate limiting, body validation, proxying |
 | `openclaw` | `alpine/openclaw` | Gateway backend |
 
 ## Install (recommended)
@@ -112,6 +112,7 @@ sudo chown -R 1000:1000 /path/to/openclaw-config /path/to/openclaw-workspace
 |---|---|---|---|
 | `CARAPACE_TOKEN` | Yes* | — | Bearer token for webhook auth |
 | `OPENCLAW_HOOKS_TOKEN` | Yes | — | Token forwarded to OpenClaw |
+| `OPENCLAW_GATEWAY_TOKEN` | Yes | — | OpenClaw gateway token (used for health checks) |
 | `OPENCLAW_UPSTREAM` | No | `http://127.0.0.1:18789` | OpenClaw upstream URL |
 | `DOMAIN` | No | `localhost` | Domain for Caddy TLS |
 | `CARAPACE_HMAC_SECRET` | No | — | HMAC-SHA256 secret for signature verification |
@@ -219,6 +220,36 @@ cloudflared tunnel run carapace
 | 443 | TCP + UDP | Caddy — HTTPS + HTTP/3 QUIC |
 
 Ports 3000 (Carapace) and 18789 (OpenClaw) stay on the internal Docker network. Do **not** expose them.
+
+## Migrating from a local OpenClaw install
+
+If you already run OpenClaw locally (not in Docker) and want to move it into the Carapace stack, paste this prompt into Claude Code:
+
+```
+SSH into <user>@<host> and migrate the existing local OpenClaw install into the
+Carapace Docker stack:
+
+1. Find the local OpenClaw data directory (usually ~/.openclaw)
+2. Stop all running openclaw processes (kill -SIGTERM, then kill -9 if needed)
+3. Create /opt/carapace with docker-compose.yml, Caddyfile, and .env from the repo
+4. Set DOMAIN=<your-domain> in .env
+5. Generate a CARAPACE_TOKEN and extract the gateway token from openclaw.json
+6. docker compose create openclaw (to initialize volumes)
+7. Copy local .openclaw/* into the openclaw_config volume, workspace into openclaw_workspace volume
+8. Replace all hardcoded paths (e.g. /root/.openclaw) with /home/node/.openclaw in
+   all .json and .jsonl files (find + sed -i)
+9. Fix openclaw.json gateway config for Docker:
+   - Set gateway.bind to "lan" (so Carapace can reach it over the Docker network)
+   - Remove gateway.mode (local-only field, invalid in Docker)
+   - Disable gateway.controlUi (set controlUi.enabled=false) — required when
+     bind is non-loopback, and the UI isn't needed behind Carapace
+   - Update agents.defaults.workspace to /home/node/.openclaw/workspace
+10. chown -R 1000:1000 on both volumes (container runs as node/uid 1000)
+11. docker compose up -d
+12. Uninstall the host-level OpenClaw (npm uninstall -g openclaw), kill any remaining
+    host processes, but keep ~/.openclaw as a backup
+13. Verify all three services are healthy, TLS cert is obtained, and test a webhook
+```
 
 ## Security
 
