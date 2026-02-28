@@ -227,6 +227,8 @@ cloudflared tunnel run carapace
 
 Ports 3000 (Carapace) and 18789 (OpenClaw) stay on the internal Docker network. Do **not** expose them.
 
+> **Tip:** Lock down your firewall to only allow **22** (SSH), **80**, and **443** inbound. Drop everything else.
+
 ## Migrating from a local OpenClaw install
 
 If you already run OpenClaw locally (not in Docker) and want to move it into the Carapace stack, paste this prompt into Claude Code:
