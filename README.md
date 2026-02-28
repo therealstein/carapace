@@ -61,9 +61,15 @@ Docker is optional. Use it only if you want a containerized gateway or to valida
 - Docker Desktop (or Docker Engine) + Docker Compose v2
 - At least 512 MB RAM available for the stack
 
-### Gateway token + pairing
+### Control UI (dashboard)
 
-After the stack starts, open `http://127.0.0.1:18789/` and paste the gateway token into the Control UI (Settings > token).
+The OpenClaw Control UI is available via SSH tunnel — it is **not** exposed to the internet.
+
+```bash
+ssh -N -L 18789:127.0.0.1:18789 user@your-server
+```
+
+Then open `http://localhost:18789/` and paste the gateway token to connect.
 
 Need the token again?
 
@@ -241,8 +247,8 @@ Carapace Docker stack:
 9. Fix openclaw.json gateway config for Docker:
    - Set gateway.bind to "lan" (so Carapace can reach it over the Docker network)
    - Remove gateway.mode (local-only field, invalid in Docker)
-   - Disable gateway.controlUi (set controlUi.enabled=false) — required when
-     bind is non-loopback, and the UI isn't needed behind Carapace
+   - Set gateway.controlUi.allowedOrigins to ["http://localhost:18789", "http://127.0.0.1:18789"]
+     (required when bind is non-loopback; allows SSH tunnel access to the dashboard)
    - Update agents.defaults.workspace to /home/node/.openclaw/workspace
 10. chown -R 1000:1000 on both volumes (container runs as node/uid 1000)
 11. docker compose up -d
