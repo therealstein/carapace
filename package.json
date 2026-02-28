@@ -1,0 +1,14 @@
+{
+  "name": "carapace",
+  "version": "1.0.0",
+  "description": "Exoskeletal webhook armor for OpenClaw",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/bun": "^1.2.0"
+  }
+}

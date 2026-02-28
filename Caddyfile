@@ -1,0 +1,18 @@
+{$DOMAIN:localhost} {
+	# Reverse proxy to Carapace
+	reverse_proxy carapace:3000
+
+	# Security headers
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		Referrer-Policy "no-referrer"
+		X-XSS-Protection "0"
+		-Server
+	}
+
+	# Optional IP allowlist — uncomment and set IPs to restrict access
+	# @blocked not remote_ip {$ALLOWED_IPS:0.0.0.0/0}
+	# respond @blocked 403
+}
