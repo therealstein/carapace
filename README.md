@@ -24,12 +24,12 @@ The compose stack runs three services:
 | Service | Image | Role |
 |---|---|---|
 | `caddy` | `caddy:2-alpine` | TLS termination, security headers, reverse proxy |
-| `carapace` | built from `Dockerfile` | Auth, rate limiting, body validation, proxying |
+| `carapace` | `therealstein/carapace:latest` | Auth, rate limiting, body validation, proxying |
 | `openclaw` | `alpine/openclaw` | Gateway backend |
 
 ## Install (recommended)
 
-Runtime: **Bun** (for local dev) or **Docker** (for production).
+All images are pulled from Docker Hub — no local build required.
 
 ```bash
 cp .env.example .env
@@ -59,7 +59,7 @@ Docker is optional. Use it only if you want a containerized gateway or to valida
 ### Requirements
 
 - Docker Desktop (or Docker Engine) + Docker Compose v2
-- At least 2 GB RAM for image build (`pnpm install` may be OOM-killed on 1 GB hosts with exit 137)
+- At least 512 MB RAM available for the stack
 
 ### Gateway token + pairing
 

@@ -19,7 +19,7 @@ services:
         condition: service_healthy
 
   carapace:
-    build: .
+    image: therealstein/carapace:latest
     restart: unless-stopped
     env_file: .env
     environment:
