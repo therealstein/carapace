@@ -1,4 +1,55 @@
-const MAX_BODY_SIZE = parseInt(process.env.MAX_BODY_SIZE || "65536", 10);
+export const MAX_BODY_SIZE = parseInt(process.env.MAX_BODY_SIZE || "65536", 10);
+
+export interface ReadBodyResult {
+  ok: boolean;
+  status?: number;
+  reason?: string;
+  buffer?: ArrayBuffer;
+}
+
+/** Read request body with early size enforcement to prevent memory DoS. */
+export async function readBody(request: Request): Promise<ReadBodyResult> {
+  // Fast reject via Content-Length header (before any allocation)
+  const contentLength = request.headers.get("content-length");
+  if (contentLength && parseInt(contentLength, 10) > MAX_BODY_SIZE) {
+    return { ok: false, status: 413, reason: "body_too_large" };
+  }
+
+  // Stream-read with cap (Content-Length can be spoofed or absent)
+  const stream = request.body;
+  if (!stream) {
+    return { ok: true, buffer: new ArrayBuffer(0) };
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  const reader = stream.getReader();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_BODY_SIZE) {
+        reader.cancel();
+        return { ok: false, status: 413, reason: "body_too_large" };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  // Concatenate chunks
+  const buffer = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return { ok: true, buffer: buffer.buffer };
+}
 
 export interface ValidationResult {
   ok: boolean;
@@ -56,10 +107,6 @@ export function validateBody(
   rawBody: ArrayBuffer,
   path: string
 ): ValidationResult {
-  if (rawBody.byteLength > MAX_BODY_SIZE) {
-    return { ok: false, status: 413, reason: "body_too_large" };
-  }
-
   let parsed: unknown;
   try {
     const text = new TextDecoder().decode(rawBody);

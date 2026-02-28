@@ -1,18 +1,30 @@
-import { authenticate } from "./auth";
+import { assertAuthConfigured, authenticate } from "./auth";
 import { checkRateLimit, recordAuthFailure, resetAuthFailures } from "./rate-limit";
-import { validateBody } from "./validate";
+import { readBody, validateBody } from "./validate";
 import { forwardRequest } from "./proxy";
 import { logger } from "./logger";
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const HOOKS_PATTERN = /^\/hooks\/[\w-]+$/;
 
+// Fail fast if no auth secrets are set
+assertAuthConfigured();
+
 function getClientIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
+  // Prefer x-real-ip (set by Caddy to the direct client IP).
+  // Fall back to the *last* x-forwarded-for entry (appended by the
+  // nearest trusted proxy). Never trust the first entry — it is
+  // attacker-controlled.
+  const realIp = request.headers.get("x-real-ip");
+  if (realIp) return realIp.trim();
+
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) {
+    const parts = xff.split(",");
+    return parts[parts.length - 1].trim();
+  }
+
+  return "unknown";
 }
 
 function json(status: number, body: Record<string, unknown>): Response {
@@ -56,8 +68,14 @@ const server = Bun.serve({
       });
     }
 
-    // Read body once for auth (HMAC) and validation
-    const bodyBuffer = await request.arrayBuffer();
+    // Read body with size cap (prevents memory DoS)
+    const bodyRead = await readBody(request);
+    if (!bodyRead.ok) {
+      const latencyMs = Math.round(performance.now() - start);
+      logger.request({ method: "POST", path, clientIp, status: bodyRead.status!, latencyMs });
+      return json(bodyRead.status!, { error: bodyRead.reason });
+    }
+    const bodyBuffer = bodyRead.buffer!;
 
     // 2. Authenticate
     const authResult = authenticate(request, bodyBuffer);

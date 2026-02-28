@@ -37,6 +37,16 @@ export interface AuthResult {
   reason?: string;
 }
 
+/** Call at startup to fail fast if auth is misconfigured. */
+export function assertAuthConfigured(): void {
+  if (getAuthMode() === "none") {
+    console.error(
+      "FATAL: No auth configured. Set CARAPACE_TOKEN and/or CARAPACE_HMAC_SECRET."
+    );
+    process.exit(1);
+  }
+}
+
 export function authenticate(
   request: Request,
   bodyBuffer: ArrayBuffer
@@ -51,8 +61,7 @@ export function authenticate(
   const mode = getAuthMode();
 
   if (mode === "none") {
-    logger.warn("no auth configured — all requests allowed");
-    return { ok: true };
+    return { ok: false, status: 500, reason: "no_auth_configured" };
   }
 
   const authHeader = request.headers.get("authorization") || "";
