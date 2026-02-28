@@ -86,8 +86,12 @@ function validateAgentPayload(body: Record<string, unknown>): ValidationResult {
     return { ok: false, status: 400, reason: "message_too_long" };
   }
 
-  // Allowlist top-level fields
-  const allowedKeys = ["message", "mode", "type", "metadata"];
+  // Allowlist top-level fields (matches OpenClaw /hooks/agent spec)
+  const allowedKeys = [
+    "message", "name", "agentId", "sessionKey", "wakeMode",
+    "deliver", "channel", "to", "model", "thinking", "timeoutSeconds",
+    "mode", "type", "metadata",
+  ];
   const cleaned: Record<string, unknown> = {};
   for (const key of allowedKeys) {
     if (body[key] !== undefined) {
