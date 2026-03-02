@@ -14,7 +14,7 @@ export function timingSafeCompare(a: string, b: string): boolean {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-const ROUTE_TOKEN_PATTERN = /^ROUTE_([A-Z0-9_]+)_TOKEN$/;
+const ROUTE_TOKEN_PATTERN = /^ROUTE_([A-Z0-9]+)_TOKEN$/;
 
 function parseMultiRoutes(): Route[] {
   const routes: Route[] = [];
