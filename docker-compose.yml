@@ -19,11 +19,9 @@ services:
         condition: service_healthy
 
   carapace:
-    image: therealstein/carapace:1.0.1
+    image: therealstein/carapace:latest
     restart: unless-stopped
     env_file: .env
-    environment:
-      - OPENCLAW_UPSTREAM=http://openclaw:18789
     expose:
       - "3000"
     networks:
@@ -39,15 +37,17 @@ services:
       retries: 3
       start_period: 5s
     depends_on:
-      openclaw:
+      openclaw-primary:
+        condition: service_started
+      openclaw-secondary:
         condition: service_started
 
-  openclaw:
+  openclaw-primary:
     image: alpine/openclaw
     restart: unless-stopped
     volumes:
-      - openclaw_config:/home/node/.openclaw
-      - openclaw_workspace:/home/node/.openclaw/workspace
+      - openclaw_primary_config:/home/node/.openclaw
+      - openclaw_primary_workspace:/home/node/.openclaw/workspace
     ports:
       - "127.0.0.1:18789:18789"
     expose:
@@ -56,7 +56,27 @@ services:
       - carapace-net
     mem_limit: 2g
     healthcheck:
-      test: ["CMD", "node", "dist/index.js", "health", "--token", "${OPENCLAW_GATEWAY_TOKEN:-}"]
+      test: ["CMD", "node", "dist/index.js", "health", "--token", "${OPENCLAW_PRIMARY_GATEWAY_TOKEN:-}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  openclaw-secondary:
+    image: alpine/openclaw
+    restart: unless-stopped
+    volumes:
+      - openclaw_secondary_config:/home/node/.openclaw
+      - openclaw_secondary_workspace:/home/node/.openclaw/workspace
+    ports:
+      - "127.0.0.1:18790:18789"
+    expose:
+      - "18789"
+    networks:
+      - carapace-net
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "node", "dist/index.js", "health", "--token", "${OPENCLAW_SECONDARY_GATEWAY_TOKEN:-}"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -69,5 +89,7 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
-  openclaw_config:
-  openclaw_workspace:
+  openclaw_primary_config:
+  openclaw_primary_workspace:
+  openclaw_secondary_config:
+  openclaw_secondary_workspace:

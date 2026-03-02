@@ -50,6 +50,7 @@ export const logger = {
     clientIp: string;
     status: number;
     latencyMs: number;
+    route?: string;
   }): void {
     emit("info", "request", {
       method: opts.method,
@@ -57,6 +58,7 @@ export const logger = {
       clientIp: opts.clientIp,
       status: opts.status,
       latencyMs: opts.latencyMs,
+      ...(opts.route && { route: opts.route }),
     });
   },
 

@@ -87,19 +87,20 @@ const server = Bun.serve({
       return json(authResult.status!, { error: authResult.reason });
     }
     resetAuthFailures(clientIp);
+    const route = authResult.route!;
 
     // 3. Validate
     const validation = validateBody(bodyBuffer, path);
     if (!validation.ok) {
       const latencyMs = Math.round(performance.now() - start);
-      logger.request({ method: "POST", path, clientIp, status: validation.status!, latencyMs });
+      logger.request({ method: "POST", path, clientIp, status: validation.status!, latencyMs, route: route.name });
       return json(validation.status!, { error: validation.reason });
     }
 
     // 4. Proxy
-    const proxyResult = await forwardRequest(path, validation.body!, clientIp);
+    const proxyResult = await forwardRequest(path, validation.body!, clientIp, route);
     const latencyMs = Math.round(performance.now() - start);
-    logger.request({ method: "POST", path, clientIp, status: proxyResult.status, latencyMs });
+    logger.request({ method: "POST", path, clientIp, status: proxyResult.status, latencyMs, route: route.name });
 
     return new Response(proxyResult.body, {
       status: proxyResult.status,

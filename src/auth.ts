@@ -1,13 +1,12 @@
-import { CryptoHasher } from "bun";
 import { logger } from "./logger";
+import { Route, findRouteByToken, routes, timingSafeCompare } from "./routes";
 
-const CARAPACE_TOKEN = process.env.CARAPACE_TOKEN || "";
 const CARAPACE_HMAC_SECRET = process.env.CARAPACE_HMAC_SECRET || "";
 
 type AuthMode = "token" | "hmac" | "both" | "none";
 
 function getAuthMode(): AuthMode {
-  const hasToken = CARAPACE_TOKEN.length > 0;
+  const hasToken = routes.length > 0;
   const hasHmac = CARAPACE_HMAC_SECRET.length > 0;
   if (hasToken && hasHmac) return "both";
   if (hasToken) return "token";
@@ -15,17 +14,8 @@ function getAuthMode(): AuthMode {
   return "none";
 }
 
-function timingSafeCompare(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.byteLength !== bufB.byteLength) {
-    return false;
-  }
-  return crypto.timingSafeEqual(bufA, bufB);
-}
-
 function verifyHmac(body: ArrayBuffer, signature: string): boolean {
-  const hasher = new CryptoHasher("sha256", CARAPACE_HMAC_SECRET);
+  const hasher = new Bun.CryptoHasher("sha256", CARAPACE_HMAC_SECRET);
   hasher.update(new Uint8Array(body));
   const expected = hasher.digest("hex");
   return timingSafeCompare(expected, signature);
@@ -35,13 +25,14 @@ export interface AuthResult {
   ok: boolean;
   status?: number;
   reason?: string;
+  route?: Route;
 }
 
 /** Call at startup to fail fast if auth is misconfigured. */
 export function assertAuthConfigured(): void {
   if (getAuthMode() === "none") {
     console.error(
-      "FATAL: No auth configured. Set CARAPACE_TOKEN and/or CARAPACE_HMAC_SECRET."
+      "FATAL: No auth configured. Set CARAPACE_TOKEN (or ROUTE_*_TOKEN) and/or CARAPACE_HMAC_SECRET."
     );
     process.exit(1);
   }
@@ -68,24 +59,32 @@ export function authenticate(
   const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   const hmacHeader = request.headers.get("x-openclaw-hmac-sha256") || "";
 
+  let matchedRoute: Route | undefined;
+
   if (mode === "token" || mode === "both") {
     if (!bearerToken) {
       return { ok: false, status: 401, reason: "missing_bearer_token" };
     }
-    if (!timingSafeCompare(bearerToken, CARAPACE_TOKEN)) {
+    const route = findRouteByToken(bearerToken);
+    if (!route) {
       return { ok: false, status: 401, reason: "invalid_bearer_token" };
     }
+    matchedRoute = route;
   }
 
   if (mode === "hmac" || mode === "both") {
     if (!hmacHeader) {
       return { ok: false, status: 401, reason: "missing_hmac_signature" };
     }
-    const valid = verifyHmac(bodyBuffer, hmacHeader);
-    if (!valid) {
+    if (!verifyHmac(bodyBuffer, hmacHeader)) {
       return { ok: false, status: 401, reason: "invalid_hmac_signature" };
     }
   }
 
-  return { ok: true };
+  // HMAC-only mode: no route matched via token, use first route
+  if (!matchedRoute && routes.length > 0) {
+    matchedRoute = routes[0];
+  }
+
+  return { ok: true, route: matchedRoute };
 }

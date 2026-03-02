@@ -1,5 +1,5 @@
-const OPENCLAW_UPSTREAM = process.env.OPENCLAW_UPSTREAM || "http://127.0.0.1:18789";
-const OPENCLAW_HOOKS_TOKEN = process.env.OPENCLAW_HOOKS_TOKEN || "";
+import type { Route } from "./routes";
+
 const PROXY_TIMEOUT_MS = parseInt(process.env.PROXY_TIMEOUT_MS || "30000", 10);
 
 export interface ProxyResult {
@@ -11,9 +11,10 @@ export interface ProxyResult {
 export async function forwardRequest(
   path: string,
   body: Record<string, unknown>,
-  clientIp: string
+  clientIp: string,
+  route: Route
 ): Promise<ProxyResult> {
-  const url = `${OPENCLAW_UPSTREAM}${path}`;
+  const url = `${route.upstream}${path}`;
   const payload = JSON.stringify(body);
 
   const headers: Record<string, string> = {
@@ -21,9 +22,9 @@ export async function forwardRequest(
     "X-Forwarded-For": clientIp,
   };
 
-  if (OPENCLAW_HOOKS_TOKEN) {
-    headers["Authorization"] = `Bearer ${OPENCLAW_HOOKS_TOKEN}`;
-    headers["x-openclaw-token"] = OPENCLAW_HOOKS_TOKEN;
+  if (route.hooksToken) {
+    headers["Authorization"] = `Bearer ${route.hooksToken}`;
+    headers["x-openclaw-token"] = route.hooksToken;
   }
 
   const controller = new AbortController();
