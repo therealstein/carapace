@@ -19,13 +19,16 @@ If you expose OpenClaw webhooks to the internet, run them through Carapace.
 Internet ──► Caddy (TLS, :443) ──► Carapace (Bun, :3000) ──► OpenClaw (:18789)
 ```
 
-The compose stack runs three services:
+Carapace supports **multi-upstream routing** — run multiple isolated OpenClaw containers, each with its own token, config, and workspace. See [Multi-Agent Setup](#multi-agent-setup).
+
+The compose stack runs three services (or more with multi-agent):
 
 | Service | Image | Role |
 |---|---|---|
 | `caddy` | `caddy:2-alpine` | TLS termination, security headers, reverse proxy |
-| `carapace` | `therealstein/carapace:1.0.2` | Auth, rate limiting, body validation, proxying |
-| `openclaw` | `alpine/openclaw` | Gateway backend |
+| `carapace` | `therealstein/carapace:latest` | Auth, rate limiting, body validation, token-based routing |
+| `openclaw-primary` | `alpine/openclaw` | Primary gateway backend |
+| `openclaw-secondary` | `alpine/openclaw` | Secondary gateway backend (optional) |
 
 ## Install (recommended)
 
@@ -33,7 +36,7 @@ All images are pulled from Docker Hub — no local build required.
 
 ```bash
 cp .env.example .env
-# Edit .env — set CARAPACE_TOKEN and OPENCLAW_HOOKS_TOKEN
+# Edit .env — set tokens (see Configuration)
 
 docker compose up -d
 ```
@@ -74,34 +77,34 @@ Then open `http://localhost:18789/` and paste the gateway token to connect.
 Need the token again?
 
 ```bash
-docker compose exec openclaw node dist/index.js dashboard --no-open
+docker compose exec openclaw-primary node dist/index.js dashboard --no-open
 ```
 
 ### Channel setup (optional)
 
 ```bash
 # WhatsApp (QR)
-docker compose exec openclaw node dist/index.js channels login
+docker compose exec openclaw-primary node dist/index.js channels login
 
 # Telegram
-docker compose exec openclaw node dist/index.js channels add --channel telegram --token "<token>"
+docker compose exec openclaw-primary node dist/index.js channels add --channel telegram --token "<token>"
 
 # Discord
-docker compose exec openclaw node dist/index.js channels add --channel discord --token "<token>"
+docker compose exec openclaw-primary node dist/index.js channels add --channel discord --token "<token>"
 ```
 
 ### Health check
 
 ```bash
-docker compose exec openclaw node dist/index.js health --token "$OPENCLAW_GATEWAY_TOKEN"
+docker compose exec openclaw-primary node dist/index.js health --token "$OPENCLAW_GATEWAY_TOKEN"
 ```
 
 ### Persistent data
 
-Config and workspace live in Docker volumes (`openclaw_config`, `openclaw_workspace`). Inspect:
+Config and workspace live in Docker volumes. Each instance has its own volumes. Inspect:
 
 ```bash
-docker volume inspect carapace_openclaw_config
+docker volume inspect carapace_openclaw_primary_config
 ```
 
 ### Permissions + EACCES
@@ -114,25 +117,57 @@ sudo chown -R 1000:1000 /path/to/openclaw-config /path/to/openclaw-workspace
 
 ## Configuration
 
+### Multi-route (recommended)
+
+Each route maps a Bearer token to an OpenClaw upstream. Carapace routes requests based on which token matches.
+
+| Variable | Required | Description |
+|---|---|---|
+| `ROUTE_<NAME>_TOKEN` | Yes | Bearer token for this route |
+| `ROUTE_<NAME>_UPSTREAM` | Yes | OpenClaw upstream URL for this route |
+| `ROUTE_<NAME>_HOOKS_TOKEN` | No | Token forwarded to this OpenClaw instance |
+
+Example:
+
+```bash
+ROUTE_PRIMARY_TOKEN=abc123
+ROUTE_PRIMARY_UPSTREAM=http://openclaw-primary:18789
+ROUTE_PRIMARY_HOOKS_TOKEN=xyz789
+
+ROUTE_SECONDARY_TOKEN=def456
+ROUTE_SECONDARY_UPSTREAM=http://openclaw-secondary:18790
+ROUTE_SECONDARY_HOOKS_TOKEN=uvw321
+```
+
+Route names must be alphanumeric (no underscores). `<NAME>` is case-insensitive in matching.
+
+### Legacy single-route (backward compatible)
+
+If no `ROUTE_*` vars are set, Carapace falls back to single-route mode:
+
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `CARAPACE_TOKEN` | Yes* | — | Bearer token for webhook auth |
-| `OPENCLAW_HOOKS_TOKEN` | Yes | — | Token forwarded to OpenClaw |
-| `OPENCLAW_GATEWAY_TOKEN` | Yes | — | OpenClaw gateway token (used for health checks) |
 | `OPENCLAW_UPSTREAM` | No | `http://127.0.0.1:18789` | OpenClaw upstream URL |
-| `DOMAIN` | No | `localhost` | Domain for Caddy TLS |
-| `CARAPACE_HMAC_SECRET` | No | — | HMAC-SHA256 secret for signature verification |
-| `RATE_LIMIT_MAX` | No | `30` | Max requests per window |
-| `RATE_LIMIT_WINDOW_MS` | No | `60000` | Rate limit window in ms |
-| `MAX_BODY_SIZE` | No | `65536` | Max request body size in bytes |
-| `PROXY_TIMEOUT_MS` | No | `30000` | Upstream request timeout in ms |
-| `LOG_LEVEL` | No | `info` | Log level: debug, info, warn, error |
+| `OPENCLAW_HOOKS_TOKEN` | No | — | Token forwarded to OpenClaw |
 
-\* At least one of `CARAPACE_TOKEN` or `CARAPACE_HMAC_SECRET` must be set.
+### Global settings
+
+| Variable | Default | Description |
+|---|---|---|
+| `DOMAIN` | `localhost` | Domain for Caddy TLS |
+| `CARAPACE_HMAC_SECRET` | — | HMAC-SHA256 secret (global, not per-route) |
+| `RATE_LIMIT_MAX` | `30` | Max requests per window |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window in ms |
+| `MAX_BODY_SIZE` | `65536` | Max request body size in bytes |
+| `PROXY_TIMEOUT_MS` | `30000` | Upstream request timeout in ms |
+| `LOG_LEVEL` | `info` | Log level: debug, info, warn, error |
+
+\* At least one of `CARAPACE_TOKEN` (or `ROUTE_*_TOKEN`) or `CARAPACE_HMAC_SECRET` must be set.
 
 ## Auth modes
 
-- **Token only** — set `CARAPACE_TOKEN`; requests need `Authorization: Bearer <token>`.
+- **Token only** — set `CARAPACE_TOKEN` or `ROUTE_*_TOKEN`; requests need `Authorization: Bearer <token>`.
 - **HMAC only** — set `CARAPACE_HMAC_SECRET`; requests need `x-openclaw-hmac-sha256` header.
 - **Both** — set both; requests must pass both checks.
 
@@ -225,7 +260,7 @@ cloudflared tunnel run carapace
 | 80 | TCP | Caddy — Let's Encrypt ACME HTTP-01 challenge |
 | 443 | TCP + UDP | Caddy — HTTPS + HTTP/3 QUIC |
 
-Ports 3000 (Carapace) and 18789 (OpenClaw) stay on the internal Docker network. Do **not** expose them.
+Ports 3000 (Carapace), 18789 and 18790 (OpenClaw) stay on the internal Docker network. Do **not** expose them.
 
 > **Tip:** Lock down your firewall to only allow **22** (SSH), **80**, and **443** inbound. Drop everything else.
 
@@ -242,8 +277,8 @@ Carapace Docker stack:
 3. Create /opt/carapace with docker-compose.yml, Caddyfile, and .env from the repo
 4. Set DOMAIN=<your-domain> in .env
 5. Generate a CARAPACE_TOKEN and extract the gateway token from openclaw.json
-6. docker compose create openclaw (to initialize volumes)
-7. Copy local .openclaw/* into the openclaw_config volume, workspace into openclaw_workspace volume
+6. docker compose create openclaw-primary (to initialize volumes)
+7. Copy local .openclaw/* into the openclaw_primary_config volume, workspace into openclaw_primary_workspace volume
 8. Replace all hardcoded paths (e.g. /root/.openclaw) with /home/node/.openclaw in
    all .json and .jsonl files (find + sed -i)
 9. Fix openclaw.json gateway config for Docker:
@@ -258,6 +293,115 @@ Carapace Docker stack:
     host processes, but keep ~/.openclaw as a backup
 13. Verify all three services are healthy, TLS cert is obtained, and test a webhook
 ```
+
+## Multi-Agent Setup
+
+Run multiple isolated OpenClaw instances behind a single Carapace proxy. Each instance gets its own container, config, workspace, and volumes — fully isolated.
+
+```
+                          ┌─► openclaw-primary   (:18789)
+Internet ──► Caddy ──► Carapace
+                          └─► openclaw-secondary (:18790)
+```
+
+### 1. Generate tokens
+
+Each route needs three tokens: a Carapace bearer token, an OpenClaw hooks token, and a gateway token.
+
+```bash
+# Generate tokens (one set per route)
+openssl rand -hex 24   # ROUTE_PRIMARY_TOKEN
+openssl rand -hex 24   # ROUTE_PRIMARY_HOOKS_TOKEN
+openssl rand -hex 24   # OPENCLAW_PRIMARY_GATEWAY_TOKEN
+openssl rand -hex 24   # ROUTE_SECONDARY_TOKEN
+openssl rand -hex 24   # ROUTE_SECONDARY_HOOKS_TOKEN
+openssl rand -hex 24   # OPENCLAW_SECONDARY_GATEWAY_TOKEN
+```
+
+### 2. Configure `.env`
+
+```bash
+DOMAIN=example.xyz
+
+ROUTE_PRIMARY_TOKEN=<generated>
+ROUTE_PRIMARY_UPSTREAM=http://openclaw-primary:18789
+ROUTE_PRIMARY_HOOKS_TOKEN=<generated>
+
+ROUTE_SECONDARY_TOKEN=<generated>
+ROUTE_SECONDARY_UPSTREAM=http://openclaw-secondary:18790
+ROUTE_SECONDARY_HOOKS_TOKEN=<generated>
+
+OPENCLAW_PRIMARY_GATEWAY_TOKEN=<generated>
+OPENCLAW_SECONDARY_GATEWAY_TOKEN=<generated>
+```
+
+### 3. Start the stack
+
+```bash
+docker compose up -d
+```
+
+### 4. Configure each OpenClaw instance
+
+Each instance needs its gateway token, hooks token, and bind address configured in its `openclaw.json`:
+
+```bash
+# Primary — port 18789
+docker exec <primary-container> node -e "
+  const fs = require('fs');
+  const c = JSON.parse(fs.readFileSync('/home/node/.openclaw/openclaw.json','utf8'));
+  c.gateway.port = 18789;
+  c.gateway.bind = 'lan';
+  c.gateway.auth.token = '<OPENCLAW_PRIMARY_GATEWAY_TOKEN>';
+  c.hooks = { enabled: true, token: '<ROUTE_PRIMARY_HOOKS_TOKEN>' };
+  fs.writeFileSync('/home/node/.openclaw/openclaw.json', JSON.stringify(c, null, 2));
+"
+
+# Secondary — port 18790
+docker exec <secondary-container> node -e "
+  const fs = require('fs');
+  const c = JSON.parse(fs.readFileSync('/home/node/.openclaw/openclaw.json','utf8'));
+  c.gateway.port = 18790;
+  c.gateway.bind = 'lan';
+  c.gateway.auth.token = '<OPENCLAW_SECONDARY_GATEWAY_TOKEN>';
+  c.hooks = { enabled: true, token: '<ROUTE_SECONDARY_HOOKS_TOKEN>' };
+  fs.writeFileSync('/home/node/.openclaw/openclaw.json', JSON.stringify(c, null, 2));
+"
+```
+
+> **Important:** The hooks token must differ from the gateway auth token — OpenClaw rejects matching tokens.
+
+### 5. Verify routing
+
+```bash
+# Primary route
+curl -X POST https://example.xyz/hooks/wake \
+  -H 'Authorization: Bearer <ROUTE_PRIMARY_TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"test primary"}'
+
+# Secondary route
+curl -X POST https://example.xyz/hooks/wake \
+  -H 'Authorization: Bearer <ROUTE_SECONDARY_TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"test secondary"}'
+```
+
+### Dashboard access
+
+Each instance binds to a different localhost port for SSH tunnel access:
+
+```bash
+# Primary dashboard
+ssh -N -L 18789:127.0.0.1:18789 user@your-server
+
+# Secondary dashboard
+ssh -N -L 18790:127.0.0.1:18790 user@your-server
+```
+
+### Adding more instances
+
+Add another `ROUTE_<NAME>_*` block to `.env` and a matching `openclaw-<name>` service to `docker-compose.yml`. Each instance needs a unique port.
 
 ## Security
 
